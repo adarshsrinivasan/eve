@@ -61,8 +61,9 @@ func NewOciSpec(name string) (OCISpec, error) {
 	// we need a dummy container object to trick containerd
 	// initialization functions into filling out defaults
 	dummy := containers.Container{ID: s.name}
-
-	if err := oci.WithDefaultSpec()(ctrdCtx, CtrdClient, &dummy, &s.Spec); err != nil {
+	ctx, done := CtrNewUserServicesCtx()
+	defer done()
+	if err := oci.WithDefaultSpec()(ctx, CtrdClient, &dummy, &s.Spec); err != nil {
 		return nil, err
 	}
 	if s.Process == nil {
@@ -102,11 +103,13 @@ func (s *ociSpec) Load(file *os.File) error {
 
 // CreateContainer starts an OCI container based on the spec
 func (s *ociSpec) CreateContainer(removeExisting bool) error {
-	_, err := CtrdClient.NewContainer(ctrdCtx, s.name, containerd.WithSpec(&s.Spec))
+	ctx, done := CtrNewUserServicesCtx()
+	defer done()
+	_, err := CtrdClient.NewContainer(ctx, s.name, containerd.WithSpec(&s.Spec))
 	// if container exists, is stopped and we are asked to remove existing - try that
 	if err != nil && removeExisting {
-		_ = CtrDeleteContainer(s.name)
-		_, err = CtrdClient.NewContainer(ctrdCtx, s.name, containerd.WithSpec(&s.Spec))
+		_ = CtrDeleteContainer(ctx, s.name)
+		_, err = CtrdClient.NewContainer(ctx, s.name, containerd.WithSpec(&s.Spec))
 	}
 	return err
 }
@@ -199,9 +202,11 @@ func (s *ociSpec) updateFromImageConfig(config v1.ImageConfig) error {
 	// we need a dummy container object to trick containerd
 	// initialization functions into filling out defaults
 	dummy := containers.Container{ID: s.name}
+	ctx, done := CtrNewUserServicesCtx()
+	defer done()
 
 	if len(config.Env) == 0 {
-		_ = oci.WithDefaultPathEnv(ctrdCtx, CtrdClient, &dummy, &s.Spec)
+		_ = oci.WithDefaultPathEnv(ctx, CtrdClient, &dummy, &s.Spec)
 	} else {
 		s.Process.Env = config.Env
 	}
@@ -213,14 +218,14 @@ func (s *ociSpec) updateFromImageConfig(config v1.ImageConfig) error {
 	}
 	s.Process.Cwd = cwd
 	if config.User != "" {
-		if err := oci.WithUser(config.User)(ctrdCtx, CtrdClient, &dummy, &s.Spec); err != nil {
+		if err := oci.WithUser(config.User)(ctx, CtrdClient, &dummy, &s.Spec); err != nil {
 			return err
 		}
-		if err := oci.WithAdditionalGIDs(fmt.Sprintf("%d", s.Process.User.UID))(ctrdCtx, CtrdClient, &dummy, &s.Spec); err != nil {
+		if err := oci.WithAdditionalGIDs(fmt.Sprintf("%d", s.Process.User.UID))(ctx, CtrdClient, &dummy, &s.Spec); err != nil {
 			return err
 		}
 	}
-	return oci.WithAdditionalGIDs("root")(ctrdCtx, CtrdClient, &dummy, &s.Spec)
+	return oci.WithAdditionalGIDs("root")(ctx, CtrdClient, &dummy, &s.Spec)
 }
 
 func (s *ociSpec) updateMounts(disks []types.DiskStatus, nested bool) {
